@@ -1,0 +1,172 @@
+
+
+AWS SERVICE :
+	1. AWS S3
+	2. AWS API Gateway
+	3. Amazon DynamoDB
+
+
+
+table_name_DynamoDb = BukuWarungTable
+  - PK (String)
+  - SK (String)
+
+
+LAMBDA_NAME     = BukuWarungHandler
+
+
+API_END_POINT	= https://8s3hyq35b4.execute-api.eu-north-1.amazonaws.com/dev/transaksi
+	- GET
+	- POST
+	- PUT
+	- DELETE 
+
+EMDPOINT_S3   = http://web-app-book-warung.s3-website.eu-north-1.amazonaws.com
+
+=========================== SOURCE LAMBDA ===========================
+import {
+  DynamoDBClient
+} from "@aws-sdk/client-dynamodb";
+
+import {
+  DynamoDBDocumentClient,
+  PutCommand,
+  QueryCommand,
+  UpdateCommand,
+  DeleteCommand
+} from "@aws-sdk/lib-dynamodb";
+
+const client = new DynamoDBClient({});
+const ddb = DynamoDBDocumentClient.from(client);
+
+const TABLE_NAME = process.env.TABLE_NAME;
+
+export const handler = async (event) => {
+  try {
+    const method = event.httpMethod;
+
+    if (method === "POST") return await createTransaksi(event);
+    if (method === "GET") return await getTransaksi(event);
+    if (method === "PUT") return await updateTransaksi(event);
+    if (method === "DELETE") return await deleteTransaksi(event);
+
+    return response(405, { message: "Method Not Allowed" });
+
+  } catch (error) {
+    console.error(error);
+    return response(500, { error: error.message });
+  }
+};
+
+/* ================= CREATE ================= */
+async function createTransaksi(event) {
+  const body = JSON.parse(event.body);
+
+  const {
+    warungId,
+    keterangan,
+    tipe,
+    jumlah
+  } = body;
+
+  const timestamp = new Date().toISOString();
+
+  const item = {
+    PK: `WARUNG#${warungId}`,
+    SK: `TRANSAKSI#${timestamp}`,
+    tanggal: timestamp.split("T")[0],
+    keterangan,
+    tipe,
+    jumlah,
+    createdAt: timestamp
+  };
+
+  await ddb.send(new PutCommand({
+    TableName: TABLE_NAME,
+    Item: item
+  }));
+
+  return response(201, {
+    message: "Transaksi berhasil ditambahkan",
+    data: item
+  });
+}
+
+/* ================= READ ================= */
+async function getTransaksi(event) {
+  const warungId = event.queryStringParameters?.warungId;
+
+  if (!warungId) {
+    return response(400, { message: "warungId wajib diisi" });
+  }
+
+  const result = await ddb.send(new QueryCommand({
+    TableName: TABLE_NAME,
+    KeyConditionExpression: "PK = :pk",
+    ExpressionAttributeValues: {
+      ":pk": `WARUNG#${warungId}`
+    }
+  }));
+
+  return response(200, {
+    data: result.Items
+  });
+}
+
+/* ================= UPDATE ================= */
+async function updateTransaksi(event) {
+  const body = JSON.parse(event.body);
+
+  const {
+    PK,
+    SK,
+    keterangan,
+    jumlah
+  } = body;
+
+  await ddb.send(new UpdateCommand({
+    TableName: TABLE_NAME,
+    Key: { PK, SK },
+    UpdateExpression: "SET keterangan = :k, jumlah = :j",
+    ExpressionAttributeValues: {
+      ":k": keterangan,
+      ":j": jumlah
+    }
+  }));
+
+  return response(200, {
+    message: "Transaksi berhasil diupdate"
+  });
+}
+
+/* ================= DELETE ================= */
+async function deleteTransaksi(event) {
+  const body = JSON.parse(event.body);
+
+  const { PK, SK } = body;
+
+  await ddb.send(new DeleteCommand({
+    TableName: TABLE_NAME,
+    Key: { PK, SK }
+  }));
+
+  return response(200, {
+    message: "Transaksi berhasil dihapus"
+  });
+}
+
+/* ================= RESPONSE ================= */
+function response(statusCode, body) {
+  return {
+    statusCode,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE",
+      "Access-Control-Allow-Headers": "Content-Type"
+    },
+    body: JSON.stringify(body)
+  };
+}
+
+=========================== REACT VITE ===========================
